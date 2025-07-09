@@ -8,7 +8,7 @@ pip install streamlit pandas requests
 ```
 3. 运行
 ```python
-streamlit run app.py
+python run_flask.py
 ```
 运行后点击终端中的 http链接即可进行操作。
 输入token

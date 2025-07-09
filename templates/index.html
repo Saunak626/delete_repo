@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub 仓库批量管理工具</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <!-- Select extension CSS -->
+    <link href="https://cdn.datatables.net/select/1.7.0/css/select.bootstrap5.min.css" rel="stylesheet">
+    
+    <style>
+        .repo-table th, .repo-table td {
+            vertical-align: middle;
+            padding: 8px !important;
+            white-space: nowrap;
+        }
+        .repo-table th {
+            font-size: 0.9em;
+            min-width: 80px;
+        }
+        .repo-table .col-checkbox {
+            width: 60px;
+            text-align: center;
+        }
+        .repo-table .col-name {
+            min-width: 200px;
+            max-width: 300px;
+        }
+        .repo-table .col-link {
+            width: 80px;
+        }
+        .repo-table .col-score {
+            width: 60px;
+            text-align: center;
+        }
+        .repo-table .col-status {
+            width: 60px;
+            text-align: center;
+        }
+        .repo-table .col-date {
+            width: 100px;
+        }
+        .repo-table .col-days {
+            width: 80px;
+            text-align: right;
+        }
+        .repo-table .col-note {
+            min-width: 150px;
+            max-width: 250px;
+            word-wrap: break-word;
+            white-space: normal;
+        }
+        .status-badge {
+            font-size: 0.8em;
+            margin: 2px;
+        }
+        .selected-row {
+            background-color: #e3f2fd !important;
+        }
+        .locked-row {
+            background-color: #fff3e0 !important;
+        }
+        .loading {
+            display: none;
+        }
+        .token-input {
+            font-family: monospace;
+        }
+        .risk-score {
+            font-weight: bold;
+        }
+        .risk-0 { color: #28a745; }
+        .risk-1 { color: #ffc107; }
+        .risk-2 { color: #fd7e14; }
+        .risk-3 { color: #dc3545; }
+        .risk-4 { color: #6f42c1; }
+        
+        /* 批量选择说明 */
+        .selection-help {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .selection-help h6 {
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .selection-help ul {
+            margin-bottom: 0;
+            padding-left: 20px;
+        }
+        .selection-help li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="text-center mb-4">
+                    📦 GitHub 仓库批量管理工具
+                </h1>
+                
+                <div class="alert alert-info">
+                    <strong>✨ 新功能亮点：</strong>
+                    支持表格排序且不会重置 | 支持拖选多个条目 | 更稳定的状态管理
+                </div>
+
+                <!-- Token 输入 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">🔑 GitHub Token</h5>
+                        <div class="input-group">
+                            <input type="password" id="tokenInput" class="form-control token-input" 
+                                   placeholder="请输入 GitHub Personal Access Token（需 repo & delete_repo 权限）">
+                            <button id="fetchButton" class="btn btn-primary">
+                                <span class="loading spinner-border spinner-border-sm me-2"></span>
+                                获取仓库列表
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 批量选择说明 -->
+                <div id="selectionHelp" class="selection-help" style="display: none;">
+                    <h6>🖱️ 批量选择操作指南</h6>
+                    <ul>
+                        <li><strong>拖拽选择：</strong> 在表格行上按住鼠标左键拖拽可选择多行</li>
+                        <li><strong>连续选择：</strong> 点击第一行，然后按住 Shift 点击最后一行</li>
+                        <li><strong>单独勾选：</strong> 直接点击前三列的复选框</li>
+                        <li><strong>批量按钮：</strong> 使用下方按钮对当前筛选结果进行批量操作</li>
+                    </ul>
+                </div>
+
+                <!-- 操作面板 -->
+                <div id="operationPanel" class="card mb-4" style="display: none;">
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">筛选风险分数 ≥</label>
+                                <input type="range" id="riskFilter" class="form-range" 
+                                       min="0" max="4" value="0">
+                                <div class="d-flex justify-content-between">
+                                    <small>0</small><small>1</small><small>2</small><small>3</small><small>4</small>
+                                </div>
+                            </div>
+                            <div class="col-md-9">
+                                <label class="form-label">批量操作</label>
+                                <div class="btn-group w-100">
+                                    <button id="selectAllBtn" class="btn btn-outline-success">✅ 全选删除</button>
+                                    <button id="selectByRiskBtn" class="btn btn-outline-warning">⚙️ 按分数选中</button>
+                                    <button id="resetBtn" class="btn btn-outline-secondary">🔄 重置选择</button>
+                                    <button id="executeArchiveBtn" class="btn btn-success">📦 执行归档</button>
+                                    <button id="executeDeleteBtn" class="btn btn-danger">🗑️ 执行删除</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 仓库表格 -->
+                <div id="tableContainer" style="display: none;">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table id="repoTable" class="table table-striped table-hover repo-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th class="col-checkbox">🔒<br>锁定</th>
+                                            <th class="col-checkbox">📦<br>归档</th>
+                                            <th class="col-checkbox">🗑️<br>删除</th>
+                                            <th class="col-name">仓库名</th>
+                                            <th class="col-link">链接</th>
+                                            <th class="col-score">风险<br>分数</th>
+                                            <th class="col-status">私有</th>
+                                            <th class="col-status">Fork</th>
+                                            <th class="col-status">已<br>归档</th>
+                                            <th class="col-status">Stars</th>
+                                            <th class="col-date">最近<br>活动</th>
+                                            <th class="col-days">未活动<br>(天)</th>
+                                            <th class="col-note">备注</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认删除模态框 -->
+    <div class="modal fade" id="deleteModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">⚠️ 确认删除</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <strong>警告：删除操作不可逆！</strong>
+                    </div>
+                    <div id="lockedReposList"></div>
+                    <div id="deleteReposList"></div>
+                    <div class="mb-3">
+                        <label class="form-label">请输入 <strong>确认删除</strong> 以继续：</label>
+                        <input type="text" id="deleteConfirmInput" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" id="confirmDeleteBtn" class="btn btn-danger">确认删除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <!-- Select extension JS -->
+    <script src="https://cdn.datatables.net/select/1.7.0/js/dataTables.select.min.js"></script>
+
+    <script>
+        let repoTable;
+        let repoData = [];
+        let reposToDelete = [];
+
+        $(document).ready(function() {
+            // 获取仓库列表
+            $('#fetchButton').click(fetchRepos);
+            
+            // 批量操作
+            $('#selectAllBtn').click(() => bulkOperation('delete_selected', true));
+            $('#selectByRiskBtn').click(selectByRisk);
+            $('#resetBtn').click(() => {
+                bulkOperation('archive_selected', false);
+                bulkOperation('delete_selected', false);
+            });
+            
+            // 执行操作
+            $('#executeArchiveBtn').click(executeArchive);
+            $('#executeDeleteBtn').click(showDeleteModal);
+            $('#confirmDeleteBtn').click(executeDelete);
+            
+            // 风险分数筛选
+            $('#riskFilter').on('input', filterByRisk);
+            
+            // 回车键快捷操作
+            $('#tokenInput').keypress(function(e) {
+                if(e.which == 13) fetchRepos();
+            });
+            $('#deleteConfirmInput').keypress(function(e) {
+                if(e.which == 13 && $(this).val() === '确认删除') executeDelete();
+            });
+        });
+
+        function fetchRepos() {
+            const token = $('#tokenInput').val().trim();
+            if (!token) {
+                alert('请输入 GitHub Token');
+                return;
+            }
+
+            $('#fetchButton .loading').show();
+            $('#fetchButton').prop('disabled', true);
+
+            $.ajax({
+                url: '/api/fetch_repos',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({token: token}),
+                success: function(response) {
+                    repoData = response.repos;
+                    initializeTable();
+                    $('#selectionHelp').show();
+                    $('#operationPanel').show();
+                    $('#tableContainer').show();
+                    showToast('成功获取 ' + repoData.length + ' 个仓库', 'success');
+                },
+                error: function(xhr) {
+                    const error = xhr.responseJSON?.error || '获取失败';
+                    showToast(error, 'danger');
+                },
+                complete: function() {
+                    $('#fetchButton .loading').hide();
+                    $('#fetchButton').prop('disabled', false);
+                }
+            });
+        }
+
+        function initializeTable() {
+            if (repoTable) {
+                repoTable.destroy();
+            }
+
+            repoTable = $('#repoTable').DataTable({
+                data: repoData,
+                columns: [
+                    {
+                        data: 'lock_repo',
+                        render: function(data, type, row, meta) {
+                            return `<input type="checkbox" class="form-check-input lock-checkbox" 
+                                    ${data ? 'checked' : ''} data-repo="${row.full_name}">`;
+                        },
+                        orderable: false
+                    },
+                    {
+                        data: 'archive_selected',
+                        render: function(data, type, row, meta) {
+                            return `<input type="checkbox" class="form-check-input archive-checkbox" 
+                                    ${data ? 'checked' : ''} data-repo="${row.full_name}">`;
+                        },
+                        orderable: false
+                    },
+                    {
+                        data: 'delete_selected',
+                        render: function(data, type, row, meta) {
+                            return `<input type="checkbox" class="form-check-input delete-checkbox" 
+                                    ${data ? 'checked' : ''} data-repo="${row.full_name}">`;
+                        },
+                        orderable: false
+                    },
+                    {data: 'full_name'},
+                    {
+                        data: 'repo_url',
+                        render: function(data, type, row) {
+                            return `<a href="${data}" target="_blank" class="btn btn-sm btn-outline-primary">访问</a>`;
+                        },
+                        orderable: false
+                    },
+                    {
+                        data: 'suggestion_score',
+                        render: function(data, type, row) {
+                            return `<span class="badge bg-secondary risk-${data}">${data}</span>`;
+                        }
+                    },
+                    {
+                        data: 'private',
+                        render: function(data) {
+                            return data ? '<span class="badge bg-warning">私有</span>' : '';
+                        }
+                    },
+                    {
+                        data: 'fork',
+                        render: function(data) {
+                            return data ? '<span class="badge bg-info">Fork</span>' : '';
+                        }
+                    },
+                    {
+                        data: 'archived',
+                        render: function(data) {
+                            return data ? '<span class="badge bg-secondary">已归档</span>' : '';
+                        }
+                    },
+                    {data: 'stars'},
+                    {data: 'last_activity_at'},
+                    {data: 'days_inactive'},
+                    {data: 'note'}
+                ],
+                pageLength: 25,
+                order: [[11, 'desc']],  // 按未活动天数排序
+                select: {
+                    style: 'multi',
+                    selector: 'td:not(:first-child):not(:nth-child(2)):not(:nth-child(3))'
+                },
+                language: {
+                    url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/zh.json'
+                },
+                scrollCollapse: true,
+                stateSave: false,
+                drawCallback: function(settings) {
+                    // 防止自动滚动到顶部
+                    if (this.api().page.info().page > 0) {
+                        return;
+                    }
+                },
+                rowCallback: function(row, data) {
+                    if (data.lock_repo) {
+                        $(row).addClass('locked-row');
+                    }
+                    if (data.delete_selected || data.archive_selected) {
+                        $(row).addClass('selected-row');
+                    }
+                }
+            });
+
+            // 绑定复选框事件
+            $('#repoTable').on('change', '.lock-checkbox, .archive-checkbox, .delete-checkbox', function() {
+                const checkbox = $(this);
+                const repoName = checkbox.data('repo');
+                const type = checkbox.hasClass('lock-checkbox') ? 'lock_repo' : 
+                            checkbox.hasClass('archive-checkbox') ? 'archive_selected' : 'delete_selected';
+                const checked = checkbox.is(':checked');
+
+                // 保存当前滚动位置
+                const scrollTop = $(window).scrollTop();
+                
+                updateRepoSelection(repoName, type, checked);
+                
+                // 恢复滚动位置
+                setTimeout(() => {
+                    $(window).scrollTop(scrollTop);
+                }, 50);
+            });
+
+            // 增强的行选择功能
+            let isDragging = false;
+            let dragStartRow = null;
+            
+            $('#repoTable tbody').on('mousedown', 'tr', function(e) {
+                // 如果点击的是复选框或链接，跳过
+                if ($(e.target).is('input[type="checkbox"]') || $(e.target).closest('a').length) {
+                    return;
+                }
+                
+                isDragging = true;
+                dragStartRow = this;
+                $(this).addClass('table-primary');
+                e.preventDefault(); // 防止文本选择
+            });
+
+            $('#repoTable tbody').on('mouseover', 'tr', function(e) {
+                if (!isDragging || !dragStartRow) return;
+                
+                // 清除之前的高亮
+                $('#repoTable tbody tr').removeClass('table-primary');
+                
+                // 计算选择范围
+                const startIndex = repoTable.row(dragStartRow).index();
+                const endIndex = repoTable.row(this).index();
+                const start = Math.min(startIndex, endIndex);
+                const end = Math.max(startIndex, endIndex);
+                
+                // 高亮选择范围
+                for (let i = start; i <= end; i++) {
+                    $(repoTable.row(i).node()).addClass('table-primary');
+                }
+            });
+
+            $(document).on('mouseup', function(e) {
+                if (!isDragging) return;
+                
+                isDragging = false;
+                const $highlightedRows = $('#repoTable tbody tr.table-primary');
+                
+                if ($highlightedRows.length > 0) {
+                    let all_selected = true;
+                    $highlightedRows.each(function() {
+                        const rowData = repoTable.row(this).data();
+                        if (rowData && !rowData.delete_selected) {
+                            all_selected = false;
+                        }
+                    });
+
+                    const new_state = !all_selected;
+                    const selections = {};
+
+                    $highlightedRows.each(function() {
+                        const rowData = repoTable.row(this).data();
+                        if (rowData) {
+                            rowData.delete_selected = new_state;
+                            selections[rowData.full_name] = {delete_selected: new_state};
+                        }
+                    });
+                    
+                    if(Object.keys(selections).length > 0) {
+                        updateMultipleSelections(selections);
+                    }
+                }
+                
+                // 清除高亮
+                $('#repoTable tbody tr').removeClass('table-primary');
+                dragStartRow = null;
+            });
+
+            // Shift+点击进行范围选择
+            $('#repoTable tbody').on('click', 'tr', function(e) {
+                // 如果点击的是复选框或链接，跳过
+                if ($(e.target).is('input[type="checkbox"]') || $(e.target).closest('a').length) {
+                    return;
+                }
+                
+                if (e.shiftKey && window.lastSelectedRow !== undefined) {
+                    const currentIndex = repoTable.row(this).index();
+                    const start = Math.min(window.lastSelectedRow, currentIndex);
+                    const end = Math.max(window.lastSelectedRow, currentIndex);
+                    
+                    const selections = {};
+                    for (let i = start; i <= end; i++) {
+                        const data = repoTable.row(i).data();
+                        if (data) {
+                            data.delete_selected = true;
+                            selections[data.full_name] = {delete_selected: true};
+                        }
+                    }
+                    
+                    updateMultipleSelections(selections);
+                }
+                
+                window.lastSelectedRow = repoTable.row(this).index();
+            });
+        }
+
+        function updateRepoSelection(repoName, type, checked) {
+            // 更新本地数据
+            const repo = repoData.find(r => r.full_name === repoName);
+            if (repo) {
+                repo[type] = checked;
+            }
+
+            // 发送到服务器
+            const selections = {};
+            selections[repoName] = {[type]: checked};
+
+            $.ajax({
+                url: '/api/update_selections',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({selections: selections})
+            });
+
+            // 重新渲染表格行样式，保持当前页面和排序
+            repoTable.rows().invalidate().draw(false);
+        }
+
+        function updateMultipleSelections(selections) {
+            // 更新本地数据
+            Object.keys(selections).forEach(repoName => {
+                const repo = repoData.find(r => r.full_name === repoName);
+                if (repo) {
+                    Object.assign(repo, selections[repoName]);
+                }
+            });
+
+            // 发送到服务器
+            $.ajax({
+                url: '/api/update_selections',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({selections: selections}),
+                success: function() {
+                    repoTable.rows().invalidate().draw(false);
+                    showToast(`已选择 ${Object.keys(selections).length} 个仓库`, 'info');
+                }
+            });
+        }
+
+        function bulkOperation(type, value) {
+            const visibleData = repoTable.rows({filter: 'applied'}).data().toArray();
+            const selections = {};
+
+            visibleData.forEach(repo => {
+                repo[type] = value;
+                selections[repo.full_name] = {[type]: value};
+            });
+
+            // 保存滚动位置
+            const scrollTop = $(window).scrollTop();
+
+            $.ajax({
+                url: '/api/update_selections',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({selections: selections}),
+                success: function() {
+                    repoTable.rows().invalidate().draw(false);
+                    showToast(`已${value ? '选中' : '取消'}可见的 ${visibleData.length} 个仓库`, 'info');
+                    
+                    // 恢复滚动位置
+                    setTimeout(() => {
+                        $(window).scrollTop(scrollTop);
+                    }, 50);
+                }
+            });
+        }
+
+        function selectByRisk() {
+            const riskThreshold = parseInt($('#riskFilter').val());
+            const visibleData = repoTable.rows({filter: 'applied'}).data().toArray();
+            const selections = {};
+
+            visibleData.forEach(repo => {
+                if (repo.suggestion_score >= riskThreshold) {
+                    repo.delete_selected = true;
+                    selections[repo.full_name] = {delete_selected: true};
+                }
+            });
+
+            // 保存滚动位置
+            const scrollTop = $(window).scrollTop();
+
+            $.ajax({
+                url: '/api/update_selections',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({selections: selections}),
+                success: function() {
+                    repoTable.rows().invalidate().draw(false);
+                    showToast(`已选中风险分数 ≥ ${riskThreshold} 的仓库`, 'warning');
+                    
+                    // 恢复滚动位置
+                    setTimeout(() => {
+                        $(window).scrollTop(scrollTop);
+                    }, 50);
+                }
+            });
+        }
+
+        function filterByRisk() {
+            const riskThreshold = parseInt($('#riskFilter').val());
+            repoTable.column(5).search(riskThreshold === 0 ? '' : '^[' + riskThreshold + '-4]$', true, false).draw();
+        }
+
+        function executeArchive() {
+            const toArchive = repoData.filter(r => r.archive_selected);
+            if (toArchive.length === 0) {
+                showToast('没有选中要归档的仓库', 'warning');
+                return;
+            }
+
+            if (!confirm(`确定要归档 ${toArchive.length} 个仓库吗？`)) return;
+
+            $.ajax({
+                url: '/api/execute_archive',
+                method: 'POST',
+                success: function(response) {
+                    showToast(`成功归档 ${response.archived_count} 个仓库`, 'success');
+                    if (response.errors.length > 0) {
+                        console.error('归档错误:', response.errors);
+                    }
+                    repoTable.draw(false);
+                },
+                error: function(xhr) {
+                    const error = xhr.responseJSON?.error || '归档失败';
+                    showToast(error, 'danger');
+                }
+            });
+        }
+
+        function showDeleteModal() {
+            const toDelete = repoData.filter(r => r.delete_selected);
+            if (toDelete.length === 0) {
+                showToast('没有选中要删除的仓库', 'warning');
+                return;
+            }
+            
+            reposToDelete = toDelete.map(r => r.full_name);
+
+            const lockedRepos = toDelete.filter(r => r.lock_repo);
+            
+            if (lockedRepos.length > 0) {
+                const lockedList = lockedRepos.map(r => `
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-warning me-2">🔒</span>
+                        <code class="text-muted">${r.full_name}</code>
+                    </div>
+                `).join('');
+                $('#lockedReposList').html(`
+                    <div class="alert alert-warning">
+                        <strong>以下仓库被锁定，无法删除：</strong>
+                        <div class="mt-2">${lockedList}</div>
+                    </div>
+                `);
+            } else {
+                $('#lockedReposList').empty();
+            }
+
+            const deleteList = toDelete.filter(r => !r.lock_repo).map(r => `
+                <div class="d-flex align-items-center justify-content-between mb-2 p-2 bg-light rounded">
+                    <code class="text-dark">${r.full_name}</code>
+                    <div>
+                        <span class="badge bg-secondary risk-${r.suggestion_score}">${r.suggestion_score}</span>
+                        ${r.private ? '<span class="badge bg-warning ms-1">私有</span>' : ''}
+                        ${r.fork ? '<span class="badge bg-info ms-1">Fork</span>' : ''}
+                    </div>
+                </div>
+            `).join('');
+            $('#deleteReposList').html(`
+                <div class="alert alert-danger">
+                    <strong>⚠️ 将要删除的仓库 (${toDelete.length - lockedRepos.length} 个)：</strong>
+                    <div class="mt-3 max-height-300" style="max-height: 300px; overflow-y: auto;">
+                        ${deleteList}
+                    </div>
+                </div>
+            `);
+
+            $('#deleteConfirmInput').val('');
+            $('#deleteModal').modal('show');
+        }
+
+        function executeDelete() {
+            const confirmText = $('#deleteConfirmInput').val().trim();
+            if (confirmText !== '确认删除') {
+                showToast('请输入"确认删除"', 'warning');
+                return;
+            }
+
+            // 禁用按钮，防止重复点击
+            $('#confirmDeleteBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 删除中...');
+
+            $.ajax({
+                url: '/api/execute_delete',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ repos_to_delete: reposToDelete }),
+                success: function(response) {
+                    // 1. 先显示成功提示
+                    showToast(`成功删除 ${response.deleted_count} 个仓库`, 'success');
+                    
+                    // 2. 关闭模态框
+                    $('#deleteModal').modal('hide');
+
+                    if (response.errors && response.errors.length > 0) {
+                        console.error('删除错误:', response.errors);
+                        showToast(`部分仓库删除失败，详情请查看控制台`, 'warning');
+                    }
+
+                    // 3. 直接在前端更新数据，实现即时刷新
+                    repoData = repoData.filter(repo => !reposToDelete.includes(repo.full_name));
+                    
+                    // 4. 重新渲染表格
+                    initializeTable();
+                    
+                    // 5. 清空待删除列表
+                    reposToDelete = [];
+                },
+                error: function(xhr) {
+                    const error = xhr.responseJSON?.error || '删除失败';
+                    if (xhr.responseJSON?.locked_repos) {
+                        showToast('存在被锁定的仓库，无法删除', 'warning');
+                    } else {
+                        showToast(error, 'danger');
+                    }
+                },
+                complete: function() {
+                    // 恢复按钮状态
+                    $('#confirmDeleteBtn').prop('disabled', false).text('确认删除');
+                }
+            });
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = $(`
+                <div class="toast align-items-center text-white bg-${type} border-0" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body">${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `);
+
+            if (!$('#toastContainer').length) {
+                $('body').append('<div id="toastContainer" class="toast-container position-fixed top-0 end-0 p-3"></div>');
+            }
+
+            $('#toastContainer').append(toast);
+            const bsToast = new bootstrap.Toast(toast[0]);
+            bsToast.show();
+
+            toast.on('hidden.bs.toast', function() {
+                $(this).remove();
+            });
+        }
+    </script>
+</body>
+</html> 
